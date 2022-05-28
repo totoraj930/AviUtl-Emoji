@@ -360,7 +360,7 @@ end
 
 -- グローバル変数にパース結果tableを保存
 local function initGrobalTable()
-  print("initGrobalTable: " .. obj.layer)
+  -- print("initGrobalTable: " .. obj.layer)
   local items,
         includedItems,
         displayedItems = getAllItemList(objText)
@@ -373,7 +373,7 @@ local function initGrobalTable()
   for lineIndex in pairs(rawLineItems) do
     local lineText1 = ""
     for i, item in pairs(rawLineItems[lineIndex]) do
-      if (type(item) == "string") then
+      if (rikky.type(item) == "string") then
         lineText1 = lineText1 .. item
       else
         lineText1 = lineText1 .. "■"
@@ -382,7 +382,7 @@ local function initGrobalTable()
 
     local lineText2 = ""
     for i, item in pairs(lineItems[lineIndex]) do
-      if (type(item) == "string") then
+      if (rikky.type(item) == "string") then
         lineText2 = lineText2 .. item
       else
         lineText2 = lineText2 .. "■"
@@ -570,7 +570,7 @@ else
     for i, item in pairs(lineTable) do
       initFont()
       local objW, objH = 0, 0
-      if (type(item) == "table") then
+      if (rikky.type(item) == "table") then
         obj.load("text", "■")
         objW = obj.w * item.zoom
         obj.load("image", item.path)
@@ -620,7 +620,7 @@ else
     for n, item in pairs(line) do
       -- 画像かテキストを読み込み
       local objW, objH = 0, 0
-      if (type(item) == "table") then
+      if (rikky.type(item) == "table") then
         obj.load("text", "■")
         objW = obj.w * item.zoom
         obj.load("image", item.path)
