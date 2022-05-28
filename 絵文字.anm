@@ -1,0 +1,658 @@
+--[[
+  AviUtl-Emoji 1.0.0
+  https://github.com/totoraj930/AviUtl-Emoji
+
+  別途rikky_moduleの導入が必要です
+
+  Copyright (c) 2022, Reona Oshima (totoraj)
+  https://twitter.com/totoraj_game
+  License: MIT
+]]
+
+
+--dialog:絵文字フォルダ,_1="twemoji\\72x72\\";ズレの修正/chk,_2=1;_,_0=nil;
+
+local EMOJI_DIR = _1 _1 = nil
+local USE_ADJUST = _2 ~= 0 _2 = nil
+
+local rikky = require("rikky_module")
+local objType, objInfo = rikky.getinfo("object")
+local objFont = rikky.getinfo("font")
+local objText = rikky.getinfo("text", obj.layer) or ""
+local objIndex = obj.index + 1 or 1
+local objNum = obj.num
+local BASE_PATH = obj.getinfo("script_path")
+local EMOJI_PATH = BASE_PATH .. EMOJI_DIR
+local isMulti = obj.getoption("multi_object")
+local GROBAL_VAL_NAME = "emoji"..obj.layer
+
+
+local function isTag(text)
+  return string.find(text, "<.+>")
+end
+
+local function isUnicode(text)
+  return string.find(text, "&#[0-9]+;")
+end
+
+local function isEmojiTag1(text)
+  return string.find(text, "{")
+end
+
+local function isEmojiTag2(text)
+  return string.find(text, "}")
+end
+
+-- isMultiだったときの処理開始位置
+local function getStartIndex()
+  local count = 1
+  for i, v in pairs(rikky.textsplit(objText)) do
+    if (v:find("[ 　]")) then
+      count = count + 1
+    elseif (not v:find("[\t\n\r]") and not isTag(v)) then
+      break
+    end
+  end
+  return count
+end
+
+-- UTF-16をUnicodePointにするやつ
+local function utf16ToUnicodePoint(a, b)
+  return string.format("%x", (a - 0xD800) * 0x400 + (b - 0xDC00) + 0x10000)
+end
+
+local function getUnicodePoint(text)
+  local list = {}
+  local addList = function (v)
+    if (v ~= nil and v:len() > 0) then
+      if (v:len() == 2) then
+        table.insert(list, rikky.convert(v, "unicode")[1])
+      else
+        table.insert(list, tonumber(v))
+      end
+    end
+  end
+  for a, b, c in text:gmatch("(.-)&#([0-9]-);(.-)") do
+    addList(a)
+    addList(b)
+    addList(c)
+  end
+
+  local unicodePointList = {}
+  local A_MIN, A_MAX = 0xD800, 0xDBFF
+  local B_MIN, B_MAX = 0xDC00, 0xDFFF
+  for i, v in pairs(list) do
+    if (A_MIN <= v and v <= A_MAX) then
+      -- 上位サロゲート
+    elseif (B_MIN <= v and v <= B_MAX) then
+      -- 下位サロゲート
+      table.insert(
+        unicodePointList,
+        utf16ToUnicodePoint(list[i-1], v)
+      )
+    else
+      table.insert(unicodePointList, string.format("%x", v))
+    end
+  end
+  return table.concat(unicodePointList, "-")
+end
+
+
+-- 処理用のアイテム
+local Item = {}
+Item.new = function (type, value, etagId, isInclude, isDisplayed)
+  return {
+    type = type or Item.type,
+    value = value or Item.value,
+    isInclude = not not isInclude, -- objIndexに含まれているか
+    isDisplayed = not not isDisplayed, -- 表示されているか
+    etagId = etagId or 0
+  }
+end
+
+local function getAllItemList(rawText)
+  local rawTextList = rikky.textsplit(rawText)
+
+  -- 文字ごとにタイプを判別してitemオブジェクトにする
+  local allItemList  = {}
+  for i, v in pairs(rawTextList) do
+    local item = Item.new()
+    item.value = v
+    if (isTag(v)) then
+      item.type = "tag"
+      item.isInclude = false
+      item.isDisplayed = true
+    elseif (isUnicode(v)) then
+      item.type = "unicode"
+      item.isInclude = true
+      item.isDisplayed = true
+    elseif (isEmojiTag1(v)) then
+      item.type = "etag1"
+    elseif (isEmojiTag2(v)) then
+      item.type = "etag2"
+    elseif (v:find("[\"\']")) then
+      item.type = "quotation"
+    elseif (v:find("[\n\r\t]")) then
+      item.type = "char"
+      item.isInclude = false
+      item.isDisplayed = true
+    else
+      item.type = "char"
+      item.isInclude = true
+      item.isDisplayed = true
+    end
+    table.insert(allItemList, item)
+  end
+
+  -- EmojiTagの確認とタイプの修正
+  local isInsideETag = false
+  local etagCount = 0
+  local includedItemList = {}
+  local displayedItemList = {}
+  for i, v in pairs(allItemList) do
+    local nextV = allItemList[i + 1] or Item.new("nil")
+    if (v.type == "etag1") then
+      if (nextV.type == "unicode" or nextV.type == "quotation") then
+        etagCount = etagCount + 1
+        isInsideETag = true
+        v.etagId = etagCount
+        v.isInclude = true
+        v.isDisplayed = true
+      else
+        v.type = "char"
+        v.isInclude = true
+        v.isDisplayed = true
+      end
+    elseif (v.type == "etag2") then
+      if (isInsideETag) then
+        isInsideETag = false
+        v.etagId = etagCount
+        v.isInclude = false
+        v.isDisplayed = false
+      else
+        v.type = "char"
+        v.isInclude = true
+        v.isDisplayed = true
+      end
+    elseif (isInsideETag) then
+      v.etagId = etagCount
+      v.isInclude = false
+      v.isDisplayed = false
+    end
+
+    if (v.isInclude) then
+      table.insert(includedItemList, v)
+    end
+    if (v.isDisplayed) then
+      table.insert(displayedItemList, v)
+    end
+  end
+
+  return allItemList, includedItemList, displayedItemList
+end
+
+local EmojiItem = {}
+EmojiItem.new = function (id, type, raw, path, zoom)
+  return {
+    id = id or 1,
+    type = type or "emoji", -- emoji or image
+    raw = raw or "", -- 独自記法の中身全て
+    path = path or BASE_PATH .. "26a0.png",
+    zoom = zoom or 1.0
+  }
+end
+-- allItemListからEmojiListを生成
+local function getEmojiList(allItemList)
+  local emojiList = {}
+
+  -- とりあえず生成
+  for i = 1, #allItemList do
+    local v = allItemList[i]
+    if (v.type == "etag1") then
+      emojiList[v.etagId] = EmojiItem.new(v.etagId, "emoji", v.value)
+    else
+      local emojiItem = emojiList[v.etagId]
+      if (emojiItem ~= nil) then
+        emojiItem.raw = emojiItem.raw .. v.value
+      end
+    end
+  end
+
+  -- 生成したアイテムのpathとtypeとzoomを設定
+  for i, v in pairs(emojiList) do
+    -- ズーム
+    local zoom = v.raw:match(",%s*([%.0-9]*)%s*}") or "1.0"
+    v.zoom = tonumber(zoom) or 1.0
+    if (v.raw:find("{[\"\'].+[\"\']")) then
+      -- パス
+      v.type = "image"
+      local path = v.raw:match("{[\"\'](.+)[\"\']")
+      if (path ~= nil) then
+        v.path = BASE_PATH .. path
+      end
+    else
+      -- 絵文字
+      local path = v.raw:match("{(&#.+;)")
+      if (path ~= nil) then
+        path = getUnicodePoint(path) .. ".png"
+        v.path = EMOJI_PATH .. path
+      end
+    end
+  end
+
+  return emojiList
+end
+
+-- AviUtlに誤認させるテキストを生成
+local function getDummyText(displayedItemList, si)
+  local text = ""
+  for i = si, #displayedItemList do
+    local v = displayedItemList[i]
+    if (v.type == "etag1") then
+      text = text .. "■"
+    else
+      text = text .. v.value
+    end
+  end
+  return text
+end
+
+local function initFont()
+  obj.setfont(
+    (objInfo["align"] >= 9 and "@" or "") .. objInfo["font"],
+    objFont["size"],
+    objInfo["type"],
+    objInfo["color"],
+    objInfo["color2"]
+  )
+end
+
+-- パース後のアイテムリストを1行ごとに分ける
+local function getLineItems(displayedItems, emojiList, useSplitChar, excludeTag)
+  -- 1行ごとに区切って扱いやすくする
+  local lineItems = {}
+  local tmpText = ""
+  local lineIndex = 1
+  for i, v in pairs(displayedItems) do
+    local _lineIndex = lineIndex
+    if (lineItems[lineIndex] == nil) then
+      lineItems[lineIndex] = {}
+    end
+    local nextV = displayedItems[i + 1]
+
+    if (v.type == "etag1") then
+      table.insert(lineItems[lineIndex], emojiList[v.etagId])
+    elseif (v.type == "tag") then
+      if (not excludeTag) then
+        tmpText = tmpText .. v.value
+        if (useSplitChar) then
+          table.insert(lineItems[_lineIndex], v.value)
+        end
+      end
+    elseif (not v.value:find("[\n\r\t]")) then
+      tmpText = tmpText .. v.value
+      if (useSplitChar) then
+        table.insert(lineItems[_lineIndex], v.value)
+      end
+    elseif (v.value == "\n") then
+      -- 改行だったらlineIndexを進める
+      lineIndex = lineIndex + 1
+    end
+
+    -- 処理が次の行に進んでいるか、次が文末か、次がetag1なら
+    if (lineIndex > _lineIndex or v.type == "etag1" or nextV == nil or nextV.type == "etag1") then
+      if (tmpText ~= "") then
+        if (not useSplitChar) then
+          table.insert(lineItems[_lineIndex], tmpText)
+        end
+        tmpText = ""
+      end
+    end
+  end
+  return lineItems
+end
+
+-- パース後のアイテムリストを元の表示状態で1行ごとに分ける
+local function getRawLineItems(items, useSplitChar)
+  local lineItems = {}
+  local tmpText = ""
+  local lineIndex = 1
+  for i, v in pairs(items) do
+    local _lineIndex = lineIndex
+    if (lineItems[lineIndex] == nil) then
+      lineItems[lineIndex] = {}
+    end
+    local nextV = items[i + 1]
+
+    if (not v.value:find("[\n\r\t]")) then
+      tmpText = tmpText .. v.value
+      if (useSplitChar) then
+        table.insert(lineItems[_lineIndex], v.value)
+      end
+    elseif (v.value == "\n") then
+      -- 改行だったらlineIndexを進める
+      lineIndex = lineIndex + 1
+    end
+
+    -- 処理が次の行に進んでいるか、次が文末か、次がetag1なら
+    if (lineIndex > _lineIndex or nextV == nil) then
+      if (tmpText ~= "") then
+        if (not useSplitChar) then
+          table.insert(lineItems[_lineIndex], tmpText)
+        end
+        tmpText = ""
+      end
+    end
+  end
+  return lineItems
+end
+
+local function getLineSizeDiff(line1, line2)
+  obj.load("text", line1)
+  local L1_W, L1_H = obj.w, obj.h
+  obj.load("text", line2)
+  local L2_W, L2_H = obj.w, obj.h
+  return {
+    w = L2_W - L1_W,
+    h = L2_H - L1_H
+  }
+end
+
+-- グローバル変数にパース結果tableを保存
+local function initGrobalTable()
+  print("initGrobalTable: " .. obj.layer)
+  local items,
+        includedItems,
+        displayedItems = getAllItemList(objText)
+  local emojiList = getEmojiList(items)
+  local lineItems = getLineItems(displayedItems, emojiList, false)
+  local includedLineItems = getLineItems(displayedItems, emojiList, true, true)
+  local rawLineItems = getRawLineItems(items, false)
+  local lineDiff = {}
+
+  for lineIndex in pairs(rawLineItems) do
+    local lineText1 = ""
+    for i, item in pairs(rawLineItems[lineIndex]) do
+      if (type(item) == "string") then
+        lineText1 = lineText1 .. item
+      else
+        lineText1 = lineText1 .. "■"
+      end
+    end
+
+    local lineText2 = ""
+    for i, item in pairs(lineItems[lineIndex]) do
+      if (type(item) == "string") then
+        lineText2 = lineText2 .. item
+      else
+        lineText2 = lineText2 .. "■"
+      end
+    end
+
+    lineDiff[lineIndex] = getLineSizeDiff(lineText1, lineText2)
+  end
+
+  local beginningDiff = 0
+  if (_G[GROBAL_VAL_NAME] ~= nil and _G[GROBAL_VAL_NAME]["beginningDiff"] ~= nil) then
+    beginningDiff = _G[GROBAL_VAL_NAME]["beginningDiff"]
+  end
+
+  local res = {
+    items = items,
+    includedItems = includedItems,
+    displayedItems = displayedItems,
+    emojiList = emojiList,
+    lineItems = lineItems,
+    includedLineItems = includedLineItems,
+    rawLineItems = rawLineItems,
+    lineDiff = lineDiff,
+    rawText = objText,
+    emojiDir = EMOJI_DIR,
+    beginningDiff = beginningDiff,
+    size = objFont.size
+  }
+  _G[GROBAL_VAL_NAME] = res
+  return res
+end
+
+-- グローバル変数からパース結果tableを読み込み
+local function getGrobalTable()
+  return _G[GROBAL_VAL_NAME]
+end
+
+-- グローバル変数に現在のtextが対象のパース結果があるか
+local function hasGrobalTable()
+  local res = _G[GROBAL_VAL_NAME]
+  if (res == nil) then
+    return false
+  end
+  return res["rawText"] == objText
+    and res["emojiDir"] == EMOJI_DIR
+    and res["size"] == objFont.size
+end
+
+
+if (isMulti) then
+  -- 文字毎に個別オブジェクトが有効のとき =================================================
+  local startIndex = getStartIndex()
+  initFont()
+  -- グローバル変数初期化の前に1文字目の横幅を記録しておく
+  if (objIndex == startIndex) then
+    if (_G[GROBAL_VAL_NAME] == nil) then
+      _G[GROBAL_VAL_NAME] = {}
+    end
+    _G[GROBAL_VAL_NAME]["beginningDiff"] = obj.w
+  end
+  -- グローバル変数の呼び出し
+  if (not hasGrobalTable()) then
+    initGrobalTable()
+  end
+  local gTable = getGrobalTable()
+  local items = gTable.items
+  local includedItems = gTable.includedItems
+  local displayedItems = gTable.displayedItems
+  local includedLineItems = gTable.includedLineItems
+  local emojiList = gTable.emojiList
+  if (objIndex == startIndex) then
+    local tmpText = ""
+    for i = 1, startIndex do
+      tmpText = tmpText .. includedItems[i].value
+    end
+    _G[GROBAL_VAL_NAME]["dummyText"] = tmpText .. getDummyText(displayedItems, startIndex)
+
+    obj.load("figure", "四角形", 0, 0)
+    rikky.settext(_G[GROBAL_VAL_NAME]["dummyText"])
+    -- obj.load("text", _G[GROBAL_VAL_NAME]["dummyText"])
+
+  else
+    -- ここから個別オブジェクトの処理 ======================================================
+
+    -- 1行目かの判定
+    local firstLineIndex = 0 -- 処理開始の行番号
+    local lineIndex = 0 -- 現在の行番号
+    local itemCount = 0
+    for i, line in pairs(gTable.includedLineItems) do
+      itemCount = itemCount + #line
+      if (itemCount >= startIndex and firstLineIndex == 0) then
+        firstLineIndex = i
+      end
+      if (itemCount >= objIndex - 1) then
+        lineIndex = i
+        break
+      end
+    end
+
+    local targetItem = includedItems[objIndex - 1]
+    local layerZoom = obj.getvalue("layer" .. obj.layer .. ".zoom") / 100
+    if (targetItem.type == "etag1") then
+      local emoji = emojiList[targetItem.etagId]
+      if (emoji ~= nil) then
+        local ox, oy, oz = obj.ox, obj.oy, obj.oz
+        local rx, ry, rz = obj.rx, obj.ry, obj.rz
+        local cx, cy, cz = obj.cx, obj.cy, obj.cz
+        local zoom = obj.zoom
+        local objW, objH = 0, 0
+        obj.load("text", "■")
+        objW = obj.w * emoji.zoom / layerZoom
+        obj.load("image", emoji.path)
+        objH = obj.h * (objW / obj.w)
+        obj.setoption("drawtarget", "tempbuffer", objW, objH)
+        obj.draw(0, 0, 0, objW / obj.w)
+        obj.load("tempbuffer", 0, 0, objW, objH)
+
+        obj.zoom = zoom
+        obj.ox = ox
+        obj.oy = oy
+        obj.oz = oz
+        obj.rx = rx
+        obj.ry = ry
+        obj.rz = rz
+        obj.cx = cx
+        obj.cy = cy
+        obj.cz = cz
+      end
+    end
+
+    local diff = gTable.lineDiff[lineIndex]
+    local xAlignType = objInfo.align % 3
+    local yAlignType = math.floor(objInfo.align / 3)
+
+    -- 文字座標の調整
+    if (USE_ADJUST) then
+      -- 処理開始行だったらダミー文字分だけ座標を戻す
+      if (lineIndex == firstLineIndex) then
+        if (objInfo.align <= 8) then
+          obj.ox = obj.ox - _G[GROBAL_VAL_NAME]["beginningDiff"]
+        else
+          obj.oy = obj.oy - _G[GROBAL_VAL_NAME]["beginningDiff"]
+        end
+      end
+      -- 文字寄せに応じて位置を調整
+      if (objInfo.align <= 8) then
+        if (xAlignType == 1) then
+          obj.ox = obj.ox - diff.w / 2
+        elseif (xAlignType == 2) then
+          obj.ox = obj.ox - diff.w
+        end
+      else
+        if (xAlignType == 1) then
+          obj.oy = obj.oy - diff.w / 2
+        elseif (xAlignType == 2) then
+          obj.oy = obj.oy - diff.w
+        end
+      end
+    end
+  end
+  -- rikky.settext(_G[GROBAL_VAL_NAME]["dummyText"])
+else
+  -- 単一オブジェクトのとき ===========================================================
+  -- グローバル変数の呼び出し
+  if (not hasGrobalTable()) then
+    initGrobalTable()
+  end
+  local gTable = getGrobalTable()
+  local items = gTable.items
+  local includedItems = gTable.includedItems
+  local displayedItems = gTable.displayedItems
+  local emojiList = gTable.emojiList
+  local lineItems = gTable.lineItems
+
+
+  -- lineテーブルを一度読み込んでサイズを確認
+  local function getLineSize(lineTable)
+    local lineW = 0
+    local lineH = 0
+    local layerZoom = obj.getvalue("layer" .. obj.layer .. ".zoom") / 100
+    if (#lineTable == 0) then
+      obj.load("text", "■")
+      lineH = obj.h * layerZoom
+    end
+    for i, item in pairs(lineTable) do
+      initFont()
+      local objW, objH = 0, 0
+      if (type(item) == "table") then
+        obj.load("text", "■")
+        objW = obj.w * item.zoom
+        obj.load("image", item.path)
+        objH = obj.h * (objW / obj.w)
+      else
+        obj.load("text", item)
+        objW, objH = obj.w, obj.h
+      end
+
+      objW = objW / layerZoom
+      objH = objH / layerZoom
+      lineW = lineW + objW + (i > 1 and objInfo.spacing_x or 0)
+      lineH = math.max(lineH, objH)
+    end
+    return lineW, lineH
+  end
+
+  -- 0:左, 1:中央, 2:右
+  local xAlignType = objInfo.align % 3
+  -- 0:上, 1:中央, 2:下
+  local yAlignType = math.floor(objInfo.align / 3)
+  -- 行と全体のサイズをあらかじめ取得
+  local lineSizeList = {}
+  local TOTAL_W = 0
+  local TOTAL_H = (#lineItems - 1) * objInfo.spacing_y
+  for i, line in pairs(lineItems) do
+    local w, h = getLineSize(line)
+    lineSizeList[i] = { w=w, h=h }
+    TOTAL_W = math.max(TOTAL_W, w)
+    TOTAL_H = TOTAL_H + h
+  end
+
+
+  obj.setoption("drawtarget", "tempbuffer", TOTAL_W, TOTAL_H)
+
+  local nextY = 0
+  for i, line in pairs(lineItems) do
+    local lineSize = lineSizeList[i]
+    local nextX = 0
+    -- 文字寄せに応じて初期位置を調整
+    if (xAlignType == 1) then
+      nextX = (TOTAL_W - lineSize.w) / 2
+    elseif (xAlignType == 2) then
+      nextX = TOTAL_W - lineSize.w
+    end
+
+    for n, item in pairs(line) do
+      -- 画像かテキストを読み込み
+      local objW, objH = 0, 0
+      if (type(item) == "table") then
+        obj.load("text", "■")
+        objW = obj.w * item.zoom
+        obj.load("image", item.path)
+        objH = obj.h * (objW / obj.w)
+      else
+        obj.load("text", item)
+        objW, objH = obj.w, obj.h
+      end
+      local tmpX = - TOTAL_W / 2 + objW / 2
+      local tmpY = - TOTAL_H / 2 + objH / 2 + (lineSize.h - objH) / 2
+      obj.draw(tmpX + nextX, tmpY + nextY, 0, objW / obj.w)
+      nextX = nextX + objW + objInfo.spacing_x
+    end
+    nextY = nextY + lineSize.h + objInfo.spacing_y
+  end
+  obj.setoption("drawtarget", "framebuffer")
+  obj.load("tempbuffer", 0, 0, TOTAL_W, TOTAL_H)
+
+  -- 文字寄せに応じて中央位置を調整
+  if (xAlignType == 0) then
+    obj.cx = - TOTAL_W / 2
+  elseif (xAlignType == 1) then
+    obj.cx = 0
+  elseif (xAlignType == 2) then
+    obj.cx = TOTAL_W / 2
+  end
+
+  if (yAlignType == 0) then
+    obj.cy = - TOTAL_H / 2
+  elseif (yAlignType == 1) then
+    obj.cy = 0
+  elseif (yAlignType == 2) then
+    obj.cy = TOTAL_H / 2
+  end
+end

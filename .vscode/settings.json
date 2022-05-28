@@ -1,0 +1,12 @@
+{
+  "files.associations": {
+    "*.obj": "lua",
+    "*.anm": "lua"
+  },
+  "[lua]" : {
+    "files.encoding": "shiftjis"
+  },
+  "Lua.diagnostics.disable": [
+    "undefined-global"
+  ]
+}
