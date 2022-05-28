@@ -81,7 +81,19 @@ AviUtlで{🤔}
 
 「画像データのキャッシュ数」によっては表示されなくなります。
 
-## ライセンス
+## License
+
+### Twitter Emoji (Twemoji)
+
+<https://github.com/twitter/twemoji/>
+
+Copyright 2019 Twitter, Inc and other contributors
+
+Code licensed under the MIT License: <http://opensource.org/licenses/MIT>
+
+Graphics licensed under CC-BY 4.0: <https://creativecommons.org/licenses/by/4.0/>
+
+### ソースコード
 
 Copyright &copy; 2022 Reona Oshima (totoraj)  
 This work is released under the MIT License.  
