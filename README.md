@@ -3,6 +3,8 @@
 
 AviUtlのテキストオブジェクトで絵文字を使えるようにするアニメーションスクリプトです。
 
+テキストオブジェクトの絵文字の部分を画像に差し替えて表示します。
+
 [こちら](https://github.com/totoraj930/AviUtl-Emoji/releases/latest)から「AviUtl-Emoji-X.X.X.zip」をダウンロードして使ってください。
 
 ## 動作確認環境
